@@ -31,7 +31,7 @@ local COLUMN_COUNT      = #ENVIRONMENT[1]   -- Column count of the environment
 local tileEngine                            -- Reference to the tile engine
 local lightingModel                         -- Reference to the lighting model
 local tileEngineViewControl                 -- Reference to the UI view control
-local lastTime = 0                          -- Used to track how much time passes between frames
+local lastTime                              -- Used to track how much time passes between frames
 
 -- -----------------------------------------------------------------------------------
 -- This will load in the example sprite sheet.  Replace this with the sprite
@@ -87,7 +87,10 @@ end
 
 -- -----------------------------------------------------------------------------------
 -- This is a callback required by the lighting model to determine whether a tile
--- is transparent.
+-- is transparent.  In this implementation, the cells with a value of zero are
+-- transparent.  The engine may ask about the transparency of tiles that are outside
+-- the boundaries of our environment, so the implementation must handle these cases.
+-- That is why nil is checked for in this example callback.
 -- -----------------------------------------------------------------------------------
 local function isTileTransparent(column, row)
     local rowTable = ENVIRONMENT[row]
@@ -101,7 +104,12 @@ end
 -- -----------------------------------------------------------------------------------
 -- This is a callback required by the lighting model to determine whether a tile
 -- should be affected by ambient light.  This simple implementation always returns
--- true which indicates that all tiles are affected by ambient lighting.
+-- true which indicates that all tiles are affected by ambient lighting.  If an
+-- environment had a section which should not be affected by ambient lighting, this
+-- callback can be used to indicate that.  For example, the environment my be
+-- an outdoor environment where the ambient lighting is the sun.  A few tiles in this
+-- environment may represent the inside of a cabin, and these tiles would need to
+-- not be affected by ambient lighting.
 -- -----------------------------------------------------------------------------------
 local function allTilesAffectedByAmbient(column, row)
     return true
@@ -117,20 +125,34 @@ local function onFrame(event)
     local lightingModel = tileEngine.getActiveModule().lightingModel
 
     if lastTime ~= 0 then
+        -- Determine the amount of time that has passed since the last frame and
+        -- record the current time in the lastTime variable to be used in the next
+        -- frame.
         local curTime = event.time
         local deltaTime = curTime - lastTime
         lastTime = curTime
 
+        -- Update the lighting model passing the amount of time that has passed since
+        -- the last frame.
         lightingModel.update(deltaTime)
     else
+        -- This is the first call to onFrame, so lastTime needs to be initialized.
         lastTime = event.time
 
+        -- This is the initial position of the camera
         camera.setLocation(7.5, 7.5)
+
+        -- Since a time delta cannot be calculated on the first frame, 1 is passed
+        -- in here as a placeholder.
         lightingModel.update(1)
     end
 
+    -- Render the tiles visible to the passed in camera.
     tileEngine.render(camera)
 
+    -- The lighting model tracks changes, then acts on all accumulated changes in
+    -- the lightingModel.update() function.  This call resets the change tracking
+    -- and must be called after lightingModel.update().
     lightingModel.resetDirtyFlags()
 end
 
@@ -142,7 +164,10 @@ end
 function scene:create( event )
     local sceneGroup = self.view
 
+    -- Create a group to act as the parent group for all tile engine DisplayObjects.
     local tileEngineLayer = display.newGroup()
+
+    -- Create an instance of TileEngine.
     tileEngine = TileEngine.Engine.new({
         parentGroup=tileEngineLayer,
         tileSize=32,
@@ -151,6 +176,11 @@ function scene:create( event )
         hideOutOfSightElements=false
     })
 
+    -- The tile engine needs at least one Module.  It can support more than
+    -- one, but this template sets up only one which should meet most use cases.
+    -- A module is composed of a LightingModel and a number of Layers
+    -- (TileLayer or EntityLayer).  An instance of the lighting model is created
+    -- first since it is needed to instantiate the Module.
     lightingModel = TileEngine.LightingModel.new({
         isTransparent = isTileTransparent,
         isTileAffectedByAmbient = allTilesAffectedByAmbient,
@@ -158,8 +188,7 @@ function scene:create( event )
         compensateLightingForViewingPosition = false
     })
 
-    lightingModel.setAmbientLight(1,1,1,0.7)
-
+    -- Instantiate the module.
     local module = TileEngine.Module.new({
         name="moduleMain",
         rows=ROW_COUNT,
@@ -168,21 +197,38 @@ function scene:create( event )
         losModel=TileEngine.LineOfSightModel.ALL_VISIBLE
     })
 
+    -- Next, layers will be added to the Module...
+
+    -- Create a TileLayer for the floor.
     local floorLayer = TileEngine.TileLayer.new({
         rows = ROW_COUNT,
         columns = COLUMN_COUNT
     })
+
+    -- Use the helper function to populate the layer.
     addFloorToLayer(floorLayer)
+
+    -- It is necessary to reset dirty tile tracking after the layer has been
+    -- fully initialized.  Not doing so will result in unnecessary processing
+    -- when the scene is first rendered which may result in an unnecessary
+    -- delay (especially for larger scenes).
+    floorLayer.resetDirtyTileCollection()
+
+    -- Add the layer to the module at index 1 (indexes start at 1, not 0).  Set
+    -- the scaling delta to zero.
     module.insertLayerAtIndex(floorLayer, 1, 0)
 
+    -- Add the module to the engine.
     tileEngine.addModule({module = module})
 
-    module.layers[1].layer.resetDirtyTileCollection()
-
+    -- Set the module as the active module.
     tileEngine.setActiveModule({
         moduleName = "moduleMain"
     })
 
+    -- To render the tiles to the screen, create a ViewControl.  This example
+    -- creates a ViewControl to fill the entire screen, but one may be created
+    -- to fill only a portion of the screen if needed.
     tileEngineViewControl = TileEngine.ViewControl.new({
         parentGroup = sceneGroup,
         centerX = display.contentCenterX,
@@ -191,6 +237,9 @@ function scene:create( event )
         pixelHeight = display.actualContentHeight,
         tileEngineInstance = tileEngine
     })
+
+    -- Finally, set the ambient light to white light with medium-high intensity.
+    lightingModel.setAmbientLight(1,1,1,0.7)
 end
 
 
@@ -201,7 +250,12 @@ function scene:show( event )
 
     if ( phase == "will" ) then
         -- Code here runs when the scene is still off screen (but is about to come on screen)
+
+        -- Set the lastTime variable to 0.  This will indicate to the onFrame event handler
+        -- that it is the first frame.
         lastTime = 0
+
+        -- Register the onFrame event handler to be called before each frame.
         Runtime:addEventListener( "enterFrame", onFrame )
     elseif ( phase == "did" ) then
         -- Code here runs when the scene is entirely on screen
@@ -216,6 +270,8 @@ function scene:hide( event )
 
     if ( phase == "will" ) then
         -- Code here runs when the scene is on screen (but is about to go off screen)
+
+        -- Remove the onFrame event handler.
         Runtime:removeEventListener( "enterFrame", onFrame )
     elseif ( phase == "did" ) then
         -- Code here runs immediately after the scene goes entirely off screen
@@ -228,12 +284,16 @@ function scene:destroy( event )
 
     local sceneGroup = self.view
     -- Code here runs prior to the removal of scene's view
+
+    -- Destroy the tile engine instance to release all of the resources it is using
     tileEngine.destroy()
     tileEngine = nil
 
+    -- Destroy the ViewControl to release all of the resources it is using
     tileEngineViewControl.destroy()
     tileEngineViewControl = nil
 
+    -- Set the reference to the lighting model to nil.
     lightingModel = nil
 end
 
