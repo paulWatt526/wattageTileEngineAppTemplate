@@ -140,9 +140,7 @@ end
 
 -- create()
 function scene:create( event )
-
     local sceneGroup = self.view
-    -- Code here runs when the scene is first created but has not yet appeared on screen
 
     local tileEngineLayer = display.newGroup()
     tileEngine = TileEngine.Engine.new({
@@ -193,39 +191,34 @@ function scene:create( event )
         pixelHeight = display.actualContentHeight,
         tileEngineInstance = tileEngine
     })
-
-    Runtime:addEventListener( "enterFrame", onFrame )
 end
 
 
 -- show()
 function scene:show( event )
-
     local sceneGroup = self.view
     local phase = event.phase
 
     if ( phase == "will" ) then
         -- Code here runs when the scene is still off screen (but is about to come on screen)
-
+        lastTime = 0
+        Runtime:addEventListener( "enterFrame", onFrame )
     elseif ( phase == "did" ) then
         -- Code here runs when the scene is entirely on screen
-
     end
 end
 
 
 -- hide()
 function scene:hide( event )
-
     local sceneGroup = self.view
     local phase = event.phase
 
     if ( phase == "will" ) then
         -- Code here runs when the scene is on screen (but is about to go off screen)
-
+        Runtime:removeEventListener( "enterFrame", onFrame )
     elseif ( phase == "did" ) then
         -- Code here runs immediately after the scene goes entirely off screen
-
     end
 end
 
@@ -235,7 +228,13 @@ function scene:destroy( event )
 
     local sceneGroup = self.view
     -- Code here runs prior to the removal of scene's view
+    tileEngine.destroy()
+    tileEngine = nil
 
+    tileEngineViewControl.destroy()
+    tileEngineViewControl = nil
+
+    lightingModel = nil
 end
 
 
